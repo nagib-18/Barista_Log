@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../db_helper.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -48,6 +49,21 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: _toggle,
             activeColor: Colors.brown,
             secondary: const Icon(Icons.cleaning_services),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ListTile(
+            leading: const Icon(Icons.coffee, color: Colors.brown),
+            title: const Text("Support the Developer"),
+            subtitle: const Text("Buy me a coffee \u2615"),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => launchUrl(
+              Uri.parse('https://buymeacoffee.com/mzcoffee'),
+              mode: LaunchMode.externalApplication,
+            ),
           ),
         ),
         const SizedBox(height: 32),

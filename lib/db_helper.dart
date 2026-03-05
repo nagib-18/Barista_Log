@@ -16,8 +16,17 @@ class DatabaseHelper {
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-    return await openDatabase(path,
-        version: 2, onCreate: _createDB, onUpgrade: _onUpgrade);
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _createDB,
+      onUpgrade: _onUpgrade,
+      onConfigure: (db) async {
+        // WAL mode prevents data loss on crash / incomplete writes
+        await db.execute('PRAGMA journal_mode=WAL');
+        await db.execute('PRAGMA synchronous=NORMAL');
+      },
+    );
   }
 
   // ── FRESH INSTALL (v2) ──────────────────────────────────────────────
@@ -142,6 +151,16 @@ class DatabaseHelper {
         where: 'remaining_weight > 0', orderBy: 'date DESC');
   }
 
+  Future<int> updateRoastRating(int roastId, double newRating) async {
+    final db = await instance.database;
+    return await db.update(
+      'roasts',
+      {'rating': newRating},
+      where: 'id = ?',
+      whereArgs: [roastId],
+    );
+  }
+
   Future<int> updateRoastWeight(int roastId, double deduction) async {
     final db = await instance.database;
     return await db.rawUpdate(
@@ -189,21 +208,67 @@ class DatabaseHelper {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  // ── DASHBOARD QUERIES ──────────────────────────────────────────────
-  Future<Map<String, dynamic>> getHomeStats() async {
+  // ── DISTINCT VALUES (for dashboard filters) ────────────────────────
+  Future<List<String>> getDistinctHomeValues(String column) async {
     final db = await instance.database;
+    final r = await db.rawQuery(
+      "SELECT DISTINCT $column FROM home_coffee WHERE $column IS NOT NULL AND $column != '' ORDER BY $column",
+    );
+    return r.map((row) => row[column] as String).toList();
+  }
+
+  Future<List<String>> getDistinctExternalValues(String column) async {
+    final db = await instance.database;
+    final r = await db.rawQuery(
+      "SELECT DISTINCT $column FROM external_coffee WHERE $column IS NOT NULL AND $column != '' ORDER BY $column",
+    );
+    return r.map((row) => row[column] as String).toList();
+  }
+
+  // ── FILTERED DASHBOARD QUERIES ─────────────────────────────────────
+  Future<Map<String, dynamic>> getHomeStats({
+    String? brand,
+    String? blend,
+    String? shot,
+  }) async {
+    final db = await instance.database;
+    final where = <String>[];
+    final args = <dynamic>[];
+    if (brand != null && brand.isNotEmpty) {
+      where.add("brand = ?");
+      args.add(brand);
+    }
+    if (blend != null && blend.isNotEmpty) {
+      where.add("blend = ?");
+      args.add(blend);
+    }
+    if (shot != null && shot.isNotEmpty) {
+      where.add("shot = ?");
+      args.add(shot);
+    }
+    final wc = where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : '';
+    final and = wc.isEmpty ? 'WHERE' : '$wc AND';
+
     final total = Sqflite.firstIntValue(
-            await db.rawQuery('SELECT COUNT(*) FROM home_coffee')) ??
+            await db.rawQuery('SELECT COUNT(*) FROM home_coffee $wc', args)) ??
         0;
-    final avgR = await db.rawQuery('SELECT AVG(rating) as v FROM home_coffee');
+    final avgR =
+        await db.rawQuery('SELECT AVG(rating) as v FROM home_coffee $wc', args);
     final avgRating = (avgR.first['v'] as num?)?.toDouble() ?? 0.0;
-    final bestBlendR = await db.rawQuery('''
-      SELECT blend, AVG(rating) as avg_r FROM home_coffee
-      WHERE blend IS NOT NULL AND blend != ''
-      GROUP BY blend ORDER BY avg_r DESC LIMIT 1
-    ''');
+
+    final bestBlendR = await db.rawQuery(
+      "SELECT blend, AVG(rating) as avg_r FROM home_coffee $and blend IS NOT NULL AND blend != '' GROUP BY blend ORDER BY avg_r DESC LIMIT 1",
+      args,
+    );
+    final bestBrandR = await db.rawQuery(
+      "SELECT brand, AVG(rating) as avg_r FROM home_coffee $and brand IS NOT NULL AND brand != '' GROUP BY brand ORDER BY avg_r DESC LIMIT 1",
+      args,
+    );
     final ratioR = await db.rawQuery(
-        'SELECT AVG(ratio) as v FROM home_coffee WHERE ratio IS NOT NULL');
+      'SELECT AVG(ratio) as v FROM home_coffee $and ratio IS NOT NULL',
+      args,
+    );
+
     return {
       'total': total,
       'avgRating': avgRating,
@@ -211,33 +276,52 @@ class DatabaseHelper {
       'bestBlendRating': bestBlendR.isNotEmpty
           ? (bestBlendR.first['avg_r'] as num?)?.toDouble()
           : null,
+      'bestBrand': bestBrandR.isNotEmpty ? bestBrandR.first['brand'] : null,
+      'bestBrandRating': bestBrandR.isNotEmpty
+          ? (bestBrandR.first['avg_r'] as num?)?.toDouble()
+          : null,
       'avgRatio': (ratioR.first['v'] as num?)?.toDouble() ?? 0.0,
     };
   }
 
-  Future<Map<String, dynamic>> getExternalStats() async {
+  Future<Map<String, dynamic>> getExternalStats({
+    String? city,
+    String? country,
+  }) async {
     final db = await instance.database;
-    final total = Sqflite.firstIntValue(
-            await db.rawQuery('SELECT COUNT(*) FROM external_coffee')) ??
+    final where = <String>[];
+    final args = <dynamic>[];
+    if (city != null && city.isNotEmpty) {
+      where.add("city = ?");
+      args.add(city);
+    }
+    if (country != null && country.isNotEmpty) {
+      where.add("country = ?");
+      args.add(country);
+    }
+    final wc = where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : '';
+    final and = wc.isEmpty ? 'WHERE' : '$wc AND';
+
+    final total = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM external_coffee $wc', args)) ??
         0;
-    final avgR =
-        await db.rawQuery('SELECT AVG(rating) as v FROM external_coffee');
+    final avgR = await db.rawQuery(
+        'SELECT AVG(rating) as v FROM external_coffee $wc', args);
     final avgRating = (avgR.first['v'] as num?)?.toDouble() ?? 0.0;
-    final bestCafeR = await db.rawQuery('''
-      SELECT cafe, AVG(rating) as avg_r FROM external_coffee
-      WHERE cafe IS NOT NULL AND cafe != ''
-      GROUP BY cafe ORDER BY avg_r DESC LIMIT 1
-    ''');
-    final bestCityR = await db.rawQuery('''
-      SELECT city, AVG(rating) as avg_r FROM external_coffee
-      WHERE city IS NOT NULL AND city != ''
-      GROUP BY city ORDER BY avg_r DESC LIMIT 1
-    ''');
-    final cityRatings = await db.rawQuery('''
-      SELECT city, AVG(rating) as avg_r, COUNT(*) as cnt FROM external_coffee
-      WHERE city IS NOT NULL AND city != ''
-      GROUP BY city ORDER BY avg_r DESC
-    ''');
+
+    final bestCafeR = await db.rawQuery(
+      "SELECT cafe, AVG(rating) as avg_r FROM external_coffee $and cafe IS NOT NULL AND cafe != '' GROUP BY cafe ORDER BY avg_r DESC LIMIT 1",
+      args,
+    );
+    final bestCityR = await db.rawQuery(
+      "SELECT city, AVG(rating) as avg_r FROM external_coffee $and city IS NOT NULL AND city != '' GROUP BY city ORDER BY avg_r DESC LIMIT 1",
+      args,
+    );
+    final cityRatings = await db.rawQuery(
+      "SELECT city, AVG(rating) as avg_r, COUNT(*) as cnt FROM external_coffee $and city IS NOT NULL AND city != '' GROUP BY city ORDER BY avg_r DESC",
+      args,
+    );
+
     return {
       'total': total,
       'avgRating': avgRating,

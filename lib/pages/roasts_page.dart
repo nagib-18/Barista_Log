@@ -67,6 +67,55 @@ class _RoastsPageState extends State<RoastsPage> {
     _snack("Roast deleted!");
   }
 
+  void _editRating(Map<String, dynamic> roast) {
+    double tempRating = (roast['rating'] as num?)?.toDouble() ?? 3.0;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text(
+              'Rate: ${roast['brand'] ?? ''} \u2013 ${roast['blend'] ?? ''}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Slider(
+                value: tempRating,
+                min: 1,
+                max: 5,
+                divisions: 8,
+                label: tempRating.toStringAsFixed(1),
+                onChanged: (v) => setDialogState(() => tempRating = v),
+                activeColor: Colors.brown,
+              ),
+              Text(
+                '${tempRating.toStringAsFixed(1)} / 5',
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await DatabaseHelper.instance
+                    .updateRoastRating(roast['id'] as int, tempRating);
+                Navigator.pop(ctx);
+                _refresh();
+                _snack("Rating updated!");
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
+              child: const Text("Save", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
@@ -154,10 +203,19 @@ class _RoastsPageState extends State<RoastsPage> {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.brown,
-          child: Text(rating,
-              style: const TextStyle(color: Colors.white, fontSize: 11)),
+        leading: GestureDetector(
+          onTap: () => _editRating(r),
+          child: CircleAvatar(
+            backgroundColor: Colors.brown,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(rating,
+                    style: const TextStyle(color: Colors.white, fontSize: 11)),
+                const Icon(Icons.edit, color: Colors.white70, size: 10),
+              ],
+            ),
+          ),
         ),
         title: Text('${r['brand'] ?? ''} – ${r['blend'] ?? ''}',
             style: const TextStyle(fontWeight: FontWeight.bold)),
