@@ -43,22 +43,26 @@ class _RoastsPageState extends State<RoastsPage> {
       return;
     }
     final weight = double.tryParse(weightCtrl.text) ?? 0;
-    await DatabaseHelper.instance.insertRoast({
-      'brand': brandCtrl.text,
-      'blend': blendCtrl.text,
-      'rating': _rating,
-      'notes': notesCtrl.text,
-      'date': DateTime.now().toIso8601String(),
-      'total_weight': weight,
-      'remaining_weight': weight,
-    });
-    brandCtrl.clear();
-    blendCtrl.clear();
-    weightCtrl.clear();
-    notesCtrl.clear();
-    setState(() => _rating = 3.0);
-    _refresh();
-    _snack("Roast added!");
+    try {
+      await DatabaseHelper.instance.insertRoast({
+        'brand': brandCtrl.text,
+        'blend': blendCtrl.text,
+        'rating': _rating,
+        'notes': notesCtrl.text,
+        'date': DateTime.now().toIso8601String(),
+        'total_weight': weight,
+        'remaining_weight': weight,
+      });
+      brandCtrl.clear();
+      blendCtrl.clear();
+      weightCtrl.clear();
+      notesCtrl.clear();
+      setState(() => _rating = 3.0);
+      _refresh();
+      _snack("Roast added!");
+    } catch (e) {
+      _snack("Error adding roast: $e");
+    }
   }
 
   void _deleteRoast(int id) async {

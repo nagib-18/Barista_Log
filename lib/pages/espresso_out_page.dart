@@ -48,23 +48,27 @@ class _EspressoOutPageState extends State<EspressoOutPage> {
       _snack("Cafe name is required!");
       return;
     }
-    await DatabaseHelper.instance.insertExternal({
-      'blend': blendCtrl.text,
-      'cafe': cafeCtrl.text,
-      'city': cityCtrl.text,
-      'country': countryCtrl.text,
-      'notes': notesCtrl.text,
-      'rating': _rating,
-      'date': DateTime.now().toIso8601String(),
-    });
-    cafeCtrl.clear();
-    blendCtrl.clear();
-    cityCtrl.clear();
-    countryCtrl.clear();
-    notesCtrl.clear();
-    setState(() => _rating = 3.0);
-    _refresh();
-    _snack("Visit logged!");
+    try {
+      await DatabaseHelper.instance.insertExternal({
+        'blend': blendCtrl.text,
+        'cafe': cafeCtrl.text,
+        'city': cityCtrl.text,
+        'country': countryCtrl.text,
+        'notes': notesCtrl.text,
+        'rating': _rating,
+        'date': DateTime.now().toIso8601String(),
+      });
+      cafeCtrl.clear();
+      blendCtrl.clear();
+      cityCtrl.clear();
+      countryCtrl.clear();
+      notesCtrl.clear();
+      setState(() => _rating = 3.0);
+      _refresh();
+      _snack("Visit logged!");
+    } catch (e) {
+      _snack("Error logging visit: $e");
+    }
   }
 
   void _deleteEntry(int id) async {

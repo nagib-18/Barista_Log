@@ -6,6 +6,7 @@ import 'pages/settings_page.dart';
 import 'pages/dashboard_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
     home: MainApp(),

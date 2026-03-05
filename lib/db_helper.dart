@@ -23,8 +23,8 @@ class DatabaseHelper {
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
         // WAL mode prevents data loss on crash / incomplete writes
-        await db.execute('PRAGMA journal_mode=WAL');
-        await db.execute('PRAGMA synchronous=NORMAL');
+        await db.rawQuery('PRAGMA journal_mode=WAL');
+        await db.rawQuery('PRAGMA synchronous=NORMAL');
       },
     );
   }

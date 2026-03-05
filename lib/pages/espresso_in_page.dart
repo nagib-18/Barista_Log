@@ -76,45 +76,49 @@ class _EspressoInPageState extends State<EspressoInPage> {
       ratio = wOut / wIn;
     }
 
-    await DatabaseHelper.instance.insertHome({
-      'shot': shotCtrl.text,
-      'brand': brandCtrl.text,
-      'blend': blendCtrl.text,
-      'review': reviewCtrl.text,
-      'rating': _rating,
-      'date': DateTime.now().toIso8601String(),
-      'weight_in': wIn,
-      'weight_out': wOut,
-      'ratio': ratio,
-      'roast_id': _selectedRoastId,
-    });
+    try {
+      await DatabaseHelper.instance.insertHome({
+        'shot': shotCtrl.text,
+        'brand': brandCtrl.text,
+        'blend': blendCtrl.text,
+        'review': reviewCtrl.text,
+        'rating': _rating,
+        'date': DateTime.now().toIso8601String(),
+        'weight_in': wIn,
+        'weight_out': wOut,
+        'ratio': ratio,
+        'roast_id': _selectedRoastId,
+      });
 
-    // Deduct weight from selected roast
-    if (_selectedRoastId != null && wIn != null && wIn > 0) {
-      await DatabaseHelper.instance.updateRoastWeight(_selectedRoastId!, wIn);
+      // Deduct weight from selected roast
+      if (_selectedRoastId != null && wIn != null && wIn > 0) {
+        await DatabaseHelper.instance.updateRoastWeight(_selectedRoastId!, wIn);
+      }
+
+      // Cleaning reminder check
+      final reminderOn =
+          await DatabaseHelper.instance.getSetting('cleaning_reminder');
+      if (reminderOn != 'false') {
+        int count = await DatabaseHelper.instance.getHomeCount();
+        if (count % 120 == 0 && mounted) _cleaningAlert(count);
+      }
+
+      shotCtrl.clear();
+      brandCtrl.clear();
+      blendCtrl.clear();
+      reviewCtrl.clear();
+      weightInCtrl.clear();
+      weightOutCtrl.clear();
+      setState(() {
+        _rating = 3.0;
+        _ratio = null;
+        _selectedRoastId = null;
+      });
+      _refresh();
+      _snack("Shot logged!");
+    } catch (e) {
+      _snack("Error saving shot: $e");
     }
-
-    // Cleaning reminder check
-    final reminderOn =
-        await DatabaseHelper.instance.getSetting('cleaning_reminder');
-    if (reminderOn != 'false') {
-      int count = await DatabaseHelper.instance.getHomeCount();
-      if (count % 120 == 0 && mounted) _cleaningAlert(count);
-    }
-
-    shotCtrl.clear();
-    brandCtrl.clear();
-    blendCtrl.clear();
-    reviewCtrl.clear();
-    weightInCtrl.clear();
-    weightOutCtrl.clear();
-    setState(() {
-      _rating = 3.0;
-      _ratio = null;
-      _selectedRoastId = null;
-    });
-    _refresh();
-    _snack("Shot logged!");
   }
 
   void _deleteEntry(Map<String, dynamic> item) async {
