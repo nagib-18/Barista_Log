@@ -11,6 +11,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   bool _cleaningReminder = true;
   int _shotsSinceReset = 0;
+  final _tempCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -18,19 +19,36 @@ class _SettingsPageState extends State<SettingsPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _tempCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final val = await DatabaseHelper.instance.getSetting('cleaning_reminder');
     final count = await DatabaseHelper.instance.getShotsSinceReset();
+    final temp = await DatabaseHelper.instance.getSetting('default_brew_temp');
     if (!mounted) return;
     setState(() {
       _cleaningReminder = val != 'false';
       _shotsSinceReset = count;
+      _tempCtrl.text = temp ?? '93';
     });
   }
 
   void _toggle(bool v) async {
     await DatabaseHelper.instance.setSetting('cleaning_reminder', v.toString());
     setState(() => _cleaningReminder = v);
+  }
+
+  void _saveBrewTemp() async {
+    final v = _tempCtrl.text.trim();
+    await DatabaseHelper.instance.setSetting('default_brew_temp', v);
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Default brew temp saved!")));
+    }
   }
 
   void _confirmResetCounter() {
@@ -56,8 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
-            child:
-                const Text("Reset", style: TextStyle(color: Colors.white)),
+            child: const Text("Reset", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -69,6 +86,53 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ── Brew Temperature ──
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(children: [
+                  Icon(Icons.thermostat, color: Colors.brown),
+                  SizedBox(width: 8),
+                  Text("Default Brew Temperature",
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ]),
+                const SizedBox(height: 4),
+                const Text("Pre-filled on every new shot log",
+                    style: TextStyle(color: Colors.grey, fontSize: 13)),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _tempCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Temperature (°C)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _saveBrewTemp,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.brown,
+                        foregroundColor: Colors.white),
+                    child: const Text("Save"),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // ── Cleaning Reminder ──
         Card(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: SwitchListTile(
@@ -82,6 +146,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         const SizedBox(height: 8),
+
+        // ── Reset Counter ──
         Card(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
@@ -93,6 +159,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         const SizedBox(height: 16),
+
+        // ── Support ──
         Card(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
@@ -116,7 +184,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               SizedBox(height: 8),
               Text(
-                "Barista Log v3.0\nYour personal coffee tracking companion.",
+                "Barista Log v4.0\nYour personal coffee tracking companion.",
                 style: TextStyle(color: Colors.grey),
               ),
             ],

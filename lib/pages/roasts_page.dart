@@ -12,6 +12,7 @@ class _RoastsPageState extends State<RoastsPage> {
   final brandCtrl = TextEditingController();
   final blendCtrl = TextEditingController();
   final weightCtrl = TextEditingController();
+  final priceCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
   final regionCtrl = TextEditingController();
   double _rating = 3.0;
@@ -30,6 +31,7 @@ class _RoastsPageState extends State<RoastsPage> {
     brandCtrl.dispose();
     blendCtrl.dispose();
     weightCtrl.dispose();
+    priceCtrl.dispose();
     notesCtrl.dispose();
     regionCtrl.dispose();
     flavorInputCtrl.dispose();
@@ -55,6 +57,7 @@ class _RoastsPageState extends State<RoastsPage> {
       return;
     }
     final weight = double.tryParse(weightCtrl.text) ?? 0;
+    final price = double.tryParse(priceCtrl.text);
     try {
       await DatabaseHelper.instance.insertRoast({
         'brand': brandCtrl.text,
@@ -66,10 +69,12 @@ class _RoastsPageState extends State<RoastsPage> {
         'remaining_weight': weight,
         'region': regionCtrl.text,
         'flavor_profile': _flavorTags.join(','),
+        'price': price,
       });
       brandCtrl.clear();
       blendCtrl.clear();
       weightCtrl.clear();
+      priceCtrl.clear();
       notesCtrl.clear();
       regionCtrl.clear();
       flavorInputCtrl.clear();
@@ -245,17 +250,12 @@ class _RoastsPageState extends State<RoastsPage> {
         Row(children: [
           Expanded(child: _field(regionCtrl, 'Region')),
           const SizedBox(width: 10),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: TextField(
-                controller: weightCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Weight (g)', border: OutlineInputBorder()),
-              ),
-            ),
-          ),
+          Expanded(child: _numField(weightCtrl, 'Weight (g)')),
+        ]),
+        Row(children: [
+          Expanded(child: _numField(priceCtrl, 'Price Paid')),
+          const SizedBox(width: 10),
+          Expanded(child: Container()), // spacer
         ]),
         _field(notesCtrl, 'Notes'),
 
@@ -353,8 +353,20 @@ class _RoastsPageState extends State<RoastsPage> {
         .where((s) => s.isNotEmpty)
         .toList();
 
+    // Cost per gram → estimated cost per shot (assuming ~18g dose)
+    String? costInfo;
+    final price = (r['price'] as num?)?.toDouble();
+    final totalW = (r['total_weight'] as num?)?.toDouble();
+    if (price != null && price > 0 && totalW != null && totalW > 0) {
+      final costPerGram = price / totalW;
+      final costPerShot = costPerGram * 18;
+      costInfo =
+          '${price.toStringAsFixed(2)} total  ·  ~${costPerShot.toStringAsFixed(2)} / shot';
+    }
+
     final subtitleParts = <String>[];
     subtitleParts.add('${remaining}g / ${total}g  ($pct% left)');
+    if (costInfo != null) subtitleParts.add(costInfo);
     if ((r['region'] as String?)?.isNotEmpty == true) {
       subtitleParts.add('Region: ${r['region']}');
     }
@@ -409,6 +421,16 @@ class _RoastsPageState extends State<RoastsPage> {
         padding: const EdgeInsets.only(bottom: 8),
         child: TextField(
           controller: c,
+          decoration: InputDecoration(
+              labelText: label, border: const OutlineInputBorder()),
+        ),
+      );
+
+  Widget _numField(TextEditingController c, String label) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          controller: c,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
               labelText: label, border: const OutlineInputBorder()),
         ),
