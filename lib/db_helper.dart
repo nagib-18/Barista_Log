@@ -18,18 +18,16 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
-        // WAL mode prevents data loss on crash / incomplete writes
         await db.rawQuery('PRAGMA journal_mode=WAL');
         await db.rawQuery('PRAGMA synchronous=NORMAL');
       },
     );
   }
 
-  // ── FRESH INSTALL (v2) ──────────────────────────────────────────────
   Future _createDB(Database db, int version) async {
     await db.execute('''
       CREATE TABLE home_coffee (
@@ -43,7 +41,8 @@ class DatabaseHelper {
         weight_in REAL,
         weight_out REAL,
         ratio REAL,
-        roast_id INTEGER
+        roast_id INTEGER,
+        shot_time INTEGER
       )
     ''');
     await db.execute('''
@@ -55,6 +54,10 @@ class DatabaseHelper {
         country TEXT,
         notes TEXT,
         rating REAL,
+        rating_vibes REAL,
+        rating_coffee REAL,
+        rating_service REAL,
+        rating_price REAL,
         date TEXT
       )
     ''');
@@ -67,7 +70,9 @@ class DatabaseHelper {
         notes TEXT,
         date TEXT,
         total_weight REAL,
-        remaining_weight REAL
+        remaining_weight REAL,
+        region TEXT,
+        flavor_profile TEXT
       )
     ''');
     await db.execute('''
@@ -78,7 +83,6 @@ class DatabaseHelper {
     ''');
   }
 
-  // ── MIGRATION v1 → v2 ──────────────────────────────────────────────
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE home_coffee ADD COLUMN weight_in REAL');
@@ -103,6 +107,15 @@ class DatabaseHelper {
           value TEXT
         )
       ''');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE home_coffee ADD COLUMN shot_time INTEGER');
+      await db.execute('ALTER TABLE roasts ADD COLUMN region TEXT');
+      await db.execute('ALTER TABLE roasts ADD COLUMN flavor_profile TEXT');
+      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_vibes REAL');
+      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_coffee REAL');
+      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_service REAL');
+      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_price REAL');
     }
   }
 
@@ -134,6 +147,14 @@ class DatabaseHelper {
     return await db.query('external_coffee', orderBy: 'date DESC');
   }
 
+  Future<List<String>> getDistinctCafes() async {
+    final db = await instance.database;
+    final r = await db.rawQuery(
+      "SELECT DISTINCT cafe FROM external_coffee WHERE cafe IS NOT NULL AND cafe != '' ORDER BY cafe",
+    );
+    return r.map((row) => row['cafe'] as String).toList();
+  }
+
   // ── ROASTS ──────────────────────────────────────────────────────────
   Future<int> insertRoast(Map<String, dynamic> row) async {
     final db = await instance.database;
@@ -159,6 +180,11 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [roastId],
     );
+  }
+
+  Future<int> updateRoastDetails(int roastId, Map<String, dynamic> fields) async {
+    final db = await instance.database;
+    return await db.update('roasts', fields, where: 'id = ?', whereArgs: [roastId]);
   }
 
   Future<int> updateRoastWeight(int roastId, double deduction) async {
@@ -208,9 +234,29 @@ class DatabaseHelper {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  // Returns shots since the last cleaning counter reset
+  Future<int> getShotsSinceReset() async {
+    final totalCount = await getHomeCount();
+    final baseStr = await getSetting('cleaning_counter_base');
+    final base = int.tryParse(baseStr ?? '0') ?? 0;
+    return totalCount - base;
+  }
+
+  Future<void> resetCleaningCounter() async {
+    final total = await getHomeCount();
+    await setSetting('cleaning_counter_base', total.toString());
+  }
+
   // ── DISTINCT VALUES (for dashboard filters) ────────────────────────
+  // Shot values are normalized: lowercase, spaces stripped for grouping
   Future<List<String>> getDistinctHomeValues(String column) async {
     final db = await instance.database;
+    if (column == 'shot') {
+      final r = await db.rawQuery(
+        "SELECT DISTINCT LOWER(REPLACE(TRIM(shot), ' ', '')) as norm_shot FROM home_coffee WHERE shot IS NOT NULL AND shot != '' ORDER BY norm_shot",
+      );
+      return r.map((row) => row['norm_shot'] as String).toList();
+    }
     final r = await db.rawQuery(
       "SELECT DISTINCT $column FROM home_coffee WHERE $column IS NOT NULL AND $column != '' ORDER BY $column",
     );
@@ -243,7 +289,8 @@ class DatabaseHelper {
       args.add(blend);
     }
     if (shot != null && shot.isNotEmpty) {
-      where.add("shot = ?");
+      // Match normalized (lowercase, no spaces)
+      where.add("LOWER(REPLACE(TRIM(shot), ' ', '')) = LOWER(REPLACE(?, ' ', ''))");
       args.add(shot);
     }
     final wc = where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : '';

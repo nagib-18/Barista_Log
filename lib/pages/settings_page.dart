@@ -10,7 +10,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _cleaningReminder = true;
-  int _shotCount = 0;
+  int _shotsSinceReset = 0;
 
   @override
   void initState() {
@@ -20,11 +20,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     final val = await DatabaseHelper.instance.getSetting('cleaning_reminder');
-    final count = await DatabaseHelper.instance.getHomeCount();
+    final count = await DatabaseHelper.instance.getShotsSinceReset();
     if (!mounted) return;
     setState(() {
-      _cleaningReminder = val != 'false'; // default: enabled
-      _shotCount = count;
+      _cleaningReminder = val != 'false';
+      _shotsSinceReset = count;
     });
   }
 
@@ -33,28 +33,68 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _cleaningReminder = v);
   }
 
+  void _confirmResetCounter() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Reset Cleaning Counter"),
+        content: const Text(
+            "This will reset the shot counter used for cleaning reminders. Your shot history is not deleted."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              await DatabaseHelper.instance.resetCleaningCounter();
+              if (mounted) Navigator.pop(context);
+              _load();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Cleaning counter reset!")),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
+            child:
+                const Text("Reset", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Card(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: SwitchListTile(
             title: const Text("Cleaning Reminder"),
-            subtitle:
-                Text("Alert every 120 shots  (current: $_shotCount shots)"),
+            subtitle: Text(
+                "Alert every 120 shots  (since last reset: $_shotsSinceReset shots)"),
             value: _cleaningReminder,
             onChanged: _toggle,
-            activeColor: Colors.brown,
+            activeThumbColor: Colors.brown,
             secondary: const Icon(Icons.cleaning_services),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ListTile(
+            leading: const Icon(Icons.restart_alt, color: Colors.brown),
+            title: const Text("Reset Cleaning Counter"),
+            subtitle: const Text("Mark machine as cleaned — resets the shot count"),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _confirmResetCounter,
           ),
         ),
         const SizedBox(height: 16),
         Card(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
             leading: const Icon(Icons.coffee, color: Colors.brown),
             title: const Text("Support the Developer"),
@@ -76,7 +116,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               SizedBox(height: 8),
               Text(
-                "Barista Log v2.0\nYour personal coffee tracking companion.",
+                "Barista Log v3.0\nYour personal coffee tracking companion.",
                 style: TextStyle(color: Colors.grey),
               ),
             ],

@@ -13,7 +13,10 @@ class _RoastsPageState extends State<RoastsPage> {
   final blendCtrl = TextEditingController();
   final weightCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
+  final regionCtrl = TextEditingController();
   double _rating = 3.0;
+  List<String> _flavorTags = [];
+  final flavorInputCtrl = TextEditingController();
   List<Map<String, dynamic>> roasts = [];
 
   @override
@@ -28,6 +31,8 @@ class _RoastsPageState extends State<RoastsPage> {
     blendCtrl.dispose();
     weightCtrl.dispose();
     notesCtrl.dispose();
+    regionCtrl.dispose();
+    flavorInputCtrl.dispose();
     super.dispose();
   }
 
@@ -35,6 +40,13 @@ class _RoastsPageState extends State<RoastsPage> {
     final data = await DatabaseHelper.instance.getRoasts();
     if (!mounted) return;
     setState(() => roasts = data);
+  }
+
+  void _addFlavor() {
+    final v = flavorInputCtrl.text.trim();
+    if (v.isEmpty) return;
+    setState(() => _flavorTags.add(v));
+    flavorInputCtrl.clear();
   }
 
   void _addRoast() async {
@@ -52,12 +64,19 @@ class _RoastsPageState extends State<RoastsPage> {
         'date': DateTime.now().toIso8601String(),
         'total_weight': weight,
         'remaining_weight': weight,
+        'region': regionCtrl.text,
+        'flavor_profile': _flavorTags.join(','),
       });
       brandCtrl.clear();
       blendCtrl.clear();
       weightCtrl.clear();
       notesCtrl.clear();
-      setState(() => _rating = 3.0);
+      regionCtrl.clear();
+      flavorInputCtrl.clear();
+      setState(() {
+        _rating = 3.0;
+        _flavorTags = [];
+      });
       _refresh();
       _snack("Roast added!");
     } catch (e) {
@@ -77,8 +96,7 @@ class _RoastsPageState extends State<RoastsPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(
-              'Rate: ${roast['brand'] ?? ''} \u2013 ${roast['blend'] ?? ''}'),
+          title: Text('Rate: ${roast['brand'] ?? ''} \u2013 ${roast['blend'] ?? ''}'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -93,23 +111,114 @@ class _RoastsPageState extends State<RoastsPage> {
               ),
               Text(
                 '${tempRating.toStringAsFixed(1)} / 5',
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Cancel"),
-            ),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
             ElevatedButton(
               onPressed: () async {
-                await DatabaseHelper.instance
-                    .updateRoastRating(roast['id'] as int, tempRating);
-                Navigator.pop(ctx);
+                await DatabaseHelper.instance.updateRoastRating(roast['id'] as int, tempRating);
+                if (ctx.mounted) Navigator.pop(ctx);
                 _refresh();
                 _snack("Rating updated!");
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
+              child: const Text("Save", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _editNotes(Map<String, dynamic> roast) {
+    final notesEditCtrl = TextEditingController(text: roast['notes'] ?? '');
+    final regionEditCtrl = TextEditingController(text: roast['region'] ?? '');
+    final existingFlavors = ((roast['flavor_profile'] as String?) ?? '')
+        .split(',')
+        .where((s) => s.isNotEmpty)
+        .toList();
+    List<String> tempFlavors = List.from(existingFlavors);
+    final flavorEdit = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('Edit: ${roast['brand'] ?? ''} \u2013 ${roast['blend'] ?? ''}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: regionEditCtrl,
+                  decoration: const InputDecoration(
+                      labelText: 'Region', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notesEditCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      labelText: 'Notes', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                const Text('Flavor Profile',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  children: tempFlavors
+                      .map((f) => Chip(
+                            label: Text(f),
+                            onDeleted: () =>
+                                setDialogState(() => tempFlavors.remove(f)),
+                          ))
+                      .toList(),
+                ),
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: flavorEdit,
+                      decoration: const InputDecoration(
+                          hintText: 'Add flavor note',
+                          border: OutlineInputBorder(),
+                          isDense: true),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.add, color: Colors.brown),
+                    onPressed: () {
+                      final v = flavorEdit.text.trim();
+                      if (v.isNotEmpty) {
+                        setDialogState(() => tempFlavors.add(v));
+                        flavorEdit.clear();
+                      }
+                    },
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            ElevatedButton(
+              onPressed: () async {
+                await DatabaseHelper.instance.updateRoastDetails(
+                  roast['id'] as int,
+                  {
+                    'notes': notesEditCtrl.text,
+                    'region': regionEditCtrl.text,
+                    'flavor_profile': tempFlavors.join(','),
+                  },
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+                _refresh();
+                _snack("Updated!");
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
               child: const Text("Save", style: TextStyle(color: Colors.white)),
@@ -134,37 +243,73 @@ class _RoastsPageState extends State<RoastsPage> {
           Expanded(child: _field(blendCtrl, 'Blend')),
         ]),
         Row(children: [
+          Expanded(child: _field(regionCtrl, 'Region')),
+          const SizedBox(width: 10),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: TextField(
                 controller: weightCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
                     labelText: 'Weight (g)', border: OutlineInputBorder()),
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Row(children: [
-              Expanded(
-                child: Slider(
-                  value: _rating,
-                  min: 1,
-                  max: 5,
-                  divisions: 8,
-                  label: _rating.toStringAsFixed(1),
-                  onChanged: (v) => setState(() => _rating = v),
-                  activeColor: Colors.brown,
-                ),
-              ),
-              Text(_rating.toStringAsFixed(1)),
-            ]),
-          ),
         ]),
         _field(notesCtrl, 'Notes'),
+
+        // Flavor profile input
+        Row(children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: TextField(
+                controller: flavorInputCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Add Flavor Note',
+                    border: OutlineInputBorder(),
+                    isDense: true),
+                onSubmitted: (_) => _addFlavor(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            icon: const Icon(Icons.add, color: Colors.brown),
+            onPressed: _addFlavor,
+          ),
+        ]),
+        if (_flavorTags.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 6,
+              children: _flavorTags
+                  .map((f) => Chip(
+                        label: Text(f),
+                        onDeleted: () => setState(() => _flavorTags.remove(f)),
+                      ))
+                  .toList(),
+            ),
+          ),
+
+        Row(children: [
+          const Text("Rating: "),
+          Expanded(
+            child: Slider(
+              value: _rating,
+              min: 1,
+              max: 5,
+              divisions: 8,
+              label: _rating.toStringAsFixed(1),
+              onChanged: (v) => setState(() => _rating = v),
+              activeColor: Colors.brown,
+            ),
+          ),
+          Text(_rating.toStringAsFixed(1)),
+        ]),
+
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -193,9 +338,8 @@ class _RoastsPageState extends State<RoastsPage> {
   Widget _buildRoastTile(Map<String, dynamic> r) {
     final date = DateTime.tryParse(r['date'] ?? '');
     final dateStr = date != null ? DateFormat('MM/dd/yyyy').format(date) : '';
-    final remaining =
-        (r['remaining_weight'] as num?)?.toStringAsFixed(0) ?? '0';
-    final total = (r['total_weight'] as num?)?.toStringAsFixed(0) ?? '0';
+    final remaining = (r['remaining_weight'] as num?)?.toStringAsFixed(1) ?? '0';
+    final total = (r['total_weight'] as num?)?.toStringAsFixed(1) ?? '0';
     final rating = (r['rating'] as num?)?.toStringAsFixed(1) ?? '?';
     final pct = (r['total_weight'] != null && (r['total_weight'] as num) > 0)
         ? ((r['remaining_weight'] as num? ?? 0) /
@@ -203,6 +347,24 @@ class _RoastsPageState extends State<RoastsPage> {
                 100)
             .toStringAsFixed(0)
         : '?';
+
+    final flavors = ((r['flavor_profile'] as String?) ?? '')
+        .split(',')
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    final subtitleParts = <String>[];
+    subtitleParts.add('${remaining}g / ${total}g  ($pct% left)');
+    if ((r['region'] as String?)?.isNotEmpty == true) {
+      subtitleParts.add('Region: ${r['region']}');
+    }
+    if (flavors.isNotEmpty) {
+      subtitleParts.add('Flavors: ${flavors.join(', ')}');
+    }
+    if ((r['notes'] as String?)?.isNotEmpty == true) {
+      subtitleParts.add(r['notes'] as String);
+    }
+    subtitleParts.add(dateStr);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -223,12 +385,21 @@ class _RoastsPageState extends State<RoastsPage> {
         ),
         title: Text('${r['brand'] ?? ''} – ${r['blend'] ?? ''}',
             style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-            '${remaining}g / ${total}g  ($pct% left)\n${r['notes'] ?? ''}\n$dateStr'),
+        subtitle: Text(subtitleParts.join('\n')),
         isThreeLine: true,
-        trailing: IconButton(
-          icon: const Icon(Icons.delete, color: Colors.red),
-          onPressed: () => _deleteRoast(r['id']),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit_note, color: Colors.brown),
+              tooltip: 'Edit notes',
+              onPressed: () => _editNotes(r),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () => _deleteRoast(r['id']),
+            ),
+          ],
         ),
       ),
     );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -26,6 +27,11 @@ class _EspressoInPageState extends State<EspressoInPage> {
   List<Map<String, dynamic>> logs = [];
   List<Map<String, dynamic>> roasts = [];
 
+  // ── Shot timer ──
+  Timer? _timer;
+  int _timerSeconds = 0;
+  bool _timerRunning = false;
+
   @override
   void initState() {
     super.initState();
@@ -34,6 +40,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
 
   @override
   void dispose() {
+    _timer?.cancel();
     shotCtrl.dispose();
     brandCtrl.dispose();
     blendCtrl.dispose();
@@ -63,6 +70,32 @@ class _EspressoInPageState extends State<EspressoInPage> {
     });
   }
 
+  void _startTimer() {
+    _timer?.cancel();
+    setState(() {
+      _timerRunning = true;
+    });
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      setState(() => _timerSeconds++);
+    });
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+    setState(() => _timerRunning = false);
+  }
+
+  void _resetTimer() {
+    _timer?.cancel();
+    setState(() {
+      _timerRunning = false;
+      _timerSeconds = 0;
+    });
+  }
+
+  String _formatTimer(int s) =>
+      '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+
   void _addCoffee() async {
     if (shotCtrl.text.isEmpty) {
       _snack("Shot type is required!");
@@ -78,7 +111,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
 
     try {
       await DatabaseHelper.instance.insertHome({
-        'shot': shotCtrl.text,
+        'shot': shotCtrl.text.trim(),
         'brand': brandCtrl.text,
         'blend': blendCtrl.text,
         'review': reviewCtrl.text,
@@ -88,19 +121,19 @@ class _EspressoInPageState extends State<EspressoInPage> {
         'weight_out': wOut,
         'ratio': ratio,
         'roast_id': _selectedRoastId,
+        'shot_time': _timerSeconds > 0 ? _timerSeconds : null,
       });
 
-      // Deduct weight from selected roast
       if (_selectedRoastId != null && wIn != null && wIn > 0) {
         await DatabaseHelper.instance.updateRoastWeight(_selectedRoastId!, wIn);
       }
 
-      // Cleaning reminder check
+      // Cleaning reminder check (uses shots since last reset)
       final reminderOn =
           await DatabaseHelper.instance.getSetting('cleaning_reminder');
       if (reminderOn != 'false') {
-        int count = await DatabaseHelper.instance.getHomeCount();
-        if (count % 120 == 0 && mounted) _cleaningAlert(count);
+        int count = await DatabaseHelper.instance.getShotsSinceReset();
+        if (count > 0 && count % 120 == 0 && mounted) _cleaningAlert(count);
       }
 
       shotCtrl.clear();
@@ -114,6 +147,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
         _ratio = null;
         _selectedRoastId = null;
       });
+      _resetTimer();
       _refresh();
       _snack("Shot logged!");
     } catch (e) {
@@ -122,7 +156,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
   }
 
   void _deleteEntry(Map<String, dynamic> item) async {
-    // Restore roast weight if this shot was linked to a roast
     if (item['roast_id'] != null && item['weight_in'] != null) {
       await DatabaseHelper.instance.restoreRoastWeight(
         item['roast_id'] as int,
@@ -137,30 +170,14 @@ class _EspressoInPageState extends State<EspressoInPage> {
   void _exportCSV() async {
     List<List<dynamic>> rows = [
       [
-        "ID",
-        "Shot",
-        "Brand",
-        "Blend",
-        "Review",
-        "Rating",
-        "Weight In",
-        "Weight Out",
-        "Ratio",
-        "Date"
+        "ID", "Shot", "Brand", "Blend", "Review", "Rating",
+        "Weight In", "Weight Out", "Ratio", "Shot Time (s)", "Date"
       ]
     ];
     for (var r in logs) {
       rows.add([
-        r['id'],
-        r['shot'],
-        r['brand'],
-        r['blend'],
-        r['review'],
-        r['rating'],
-        r['weight_in'],
-        r['weight_out'],
-        r['ratio'],
-        r['date'],
+        r['id'], r['shot'], r['brand'], r['blend'], r['review'], r['rating'],
+        r['weight_in'], r['weight_out'], r['ratio'], r['shot_time'], r['date'],
       ]);
     }
     final csv = const ListToCsvConverter().convert(rows);
@@ -190,7 +207,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
         context: context,
         builder: (_) => AlertDialog(
           title: const Text("⚠️ CLEAN MACHINE"),
-          content: Text("$count shots reached.\nTime to clean your machine!"),
+          content: Text("$count shots since last reset.\nTime to clean your machine!"),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -199,7 +216,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
         ),
       );
 
-  // ── BUILD ───────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -217,7 +233,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
             ...roasts.map((r) => DropdownMenuItem<int?>(
                   value: r['id'] as int,
                   child: Text(
-                      '${r['brand'] ?? ''} – ${r['blend'] ?? ''} (${(r['remaining_weight'] as num?)?.toStringAsFixed(0) ?? '?'}g)'),
+                      '${r['brand'] ?? ''} – ${r['blend'] ?? ''} (${(r['remaining_weight'] as num?)?.toStringAsFixed(1) ?? '?'}g)'),
                 )),
           ],
           onChanged: _onRoastSelected,
@@ -232,7 +248,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
           Expanded(child: _field(blendCtrl, 'Blend')),
         ]),
 
-        // Weight + ratio
         Row(children: [
           Expanded(child: _numField(weightInCtrl, 'Dose In (g)')),
           const SizedBox(width: 10),
@@ -250,9 +265,51 @@ class _EspressoInPageState extends State<EspressoInPage> {
             ),
           ),
 
+        // Shot timer
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.timer, color: Colors.brown),
+                const SizedBox(width: 8),
+                Text(
+                  _formatTimer(_timerSeconds),
+                  style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      fontFeatures: [FontFeature.tabularFigures()]),
+                ),
+                const Spacer(),
+                if (!_timerRunning)
+                  IconButton(
+                    icon: const Icon(Icons.play_arrow, color: Colors.brown),
+                    tooltip: 'Start',
+                    onPressed: _startTimer,
+                  ),
+                if (_timerRunning)
+                  IconButton(
+                    icon: const Icon(Icons.stop, color: Colors.brown),
+                    tooltip: 'Stop',
+                    onPressed: _stopTimer,
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Colors.grey),
+                  tooltip: 'Reset',
+                  onPressed: _resetTimer,
+                ),
+              ],
+            ),
+          ),
+        ),
+
         _field(reviewCtrl, 'Review'),
 
-        // Rating slider (0.5 increments)
         Row(children: [
           const Text("Rating: "),
           Expanded(
@@ -289,7 +346,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
         ),
         const Divider(thickness: 2),
 
-        // Log entries
         ...logs.map(_buildLogTile),
       ],
     );
@@ -309,11 +365,16 @@ class _EspressoInPageState extends State<EspressoInPage> {
       parts.add(item['review']);
     }
     if (item['weight_in'] != null || item['weight_out'] != null) {
-      var w = '${item['weight_in'] ?? '?'}g → ${item['weight_out'] ?? '?'}g';
+      final wIn = (item['weight_in'] as num?)?.toStringAsFixed(1) ?? '?';
+      final wOut = (item['weight_out'] as num?)?.toStringAsFixed(1) ?? '?';
+      var w = '${wIn}g → ${wOut}g';
       if (item['ratio'] != null) {
         w += '  (1:${(item['ratio'] as num).toStringAsFixed(1)})';
       }
       parts.add(w);
+    }
+    if (item['shot_time'] != null && (item['shot_time'] as int) > 0) {
+      parts.add('Time: ${_formatTimer(item['shot_time'] as int)}');
     }
     parts.add(dateStr);
 
