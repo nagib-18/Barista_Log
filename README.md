@@ -1,5 +1,12 @@
 # barista_log
 
+## Latest APK Download
+
+- [barista_log.apk](barista_log.apk)
+
+Latest version currently in repo:
+- 2.0.1+3 (release APK)
+
 A new Flutter project.
 
 ## Getting Started
