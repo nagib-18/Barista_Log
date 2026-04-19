@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../db_helper.dart';
+import 'map_page.dart';
 
 class RoastsPage extends StatefulWidget {
   const RoastsPage({super.key});
@@ -15,6 +18,7 @@ class _RoastsPageState extends State<RoastsPage> {
   final priceCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
   final regionCtrl = TextEditingController();
+  final originCtrl = TextEditingController();
   double _rating = 3.0;
   List<String> _flavorTags = [];
   final flavorInputCtrl = TextEditingController();
@@ -34,6 +38,7 @@ class _RoastsPageState extends State<RoastsPage> {
     priceCtrl.dispose();
     notesCtrl.dispose();
     regionCtrl.dispose();
+    originCtrl.dispose();
     flavorInputCtrl.dispose();
     super.dispose();
   }
@@ -42,6 +47,29 @@ class _RoastsPageState extends State<RoastsPage> {
     final data = await DatabaseHelper.instance.getRoasts();
     if (!mounted) return;
     setState(() => roasts = data);
+  }
+
+  Future<(double, double)?> _geocode(String query) async {
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query,
+        'format': 'json',
+        'limit': '1',
+      });
+      final res = await http
+          .get(uri, headers: {'User-Agent': 'BaristaLog/1.0 (nagib.nb995@gmail.com)'})
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as List;
+        if (data.isNotEmpty) {
+          return (
+            double.parse(data[0]['lat'] as String),
+            double.parse(data[0]['lon'] as String),
+          );
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   void _addFlavor() {
@@ -58,6 +86,18 @@ class _RoastsPageState extends State<RoastsPage> {
     }
     final weight = double.tryParse(weightCtrl.text) ?? 0;
     final price = double.tryParse(priceCtrl.text);
+    final originText = originCtrl.text.trim();
+
+    // Geocode origin in background — non-blocking
+    double? lat, lng;
+    if (originText.isNotEmpty) {
+      final coords = await _geocode(originText);
+      if (coords != null) {
+        lat = coords.$1;
+        lng = coords.$2;
+      }
+    }
+
     try {
       await DatabaseHelper.instance.insertRoast({
         'brand': brandCtrl.text,
@@ -70,6 +110,9 @@ class _RoastsPageState extends State<RoastsPage> {
         'region': regionCtrl.text,
         'flavor_profile': _flavorTags.join(','),
         'price': price,
+        'origin': originText.isNotEmpty ? originText : null,
+        'origin_lat': lat,
+        'origin_lng': lng,
       });
       brandCtrl.clear();
       blendCtrl.clear();
@@ -77,13 +120,18 @@ class _RoastsPageState extends State<RoastsPage> {
       priceCtrl.clear();
       notesCtrl.clear();
       regionCtrl.clear();
+      originCtrl.clear();
       flavorInputCtrl.clear();
       setState(() {
         _rating = 3.0;
         _flavorTags = [];
       });
       _refresh();
-      _snack("Roast added!");
+      if (originText.isNotEmpty && lat == null) {
+        _snack("Roast added! (Origin not geocoded — check spelling)");
+      } else {
+        _snack("Roast added!");
+      }
     } catch (e) {
       _snack("Error adding roast: $e");
     }
@@ -253,9 +301,9 @@ class _RoastsPageState extends State<RoastsPage> {
           Expanded(child: _numField(weightCtrl, 'Weight (g)')),
         ]),
         Row(children: [
-          Expanded(child: _numField(priceCtrl, 'Price Paid')),
+          Expanded(child: _numField(priceCtrl, 'Price Paid (€)')),
           const SizedBox(width: 10),
-          Expanded(child: Container()), // spacer
+          Expanded(child: _field(originCtrl, 'Origin (City, Country)')),
         ]),
         _field(notesCtrl, 'Notes'),
 
@@ -320,6 +368,18 @@ class _RoastsPageState extends State<RoastsPage> {
           ),
         ),
         const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MapPage()),
+            ),
+            icon: const Icon(Icons.map_outlined, color: Colors.brown),
+            label: const Text('View Origins Map',
+                style: TextStyle(color: Colors.brown)),
+          ),
+        ),
         const Divider(thickness: 2),
         if (roasts.isEmpty)
           const Padding(
@@ -361,12 +421,16 @@ class _RoastsPageState extends State<RoastsPage> {
       final costPerGram = price / totalW;
       final costPerShot = costPerGram * 18;
       costInfo =
-          '${price.toStringAsFixed(2)} total  ·  ~${costPerShot.toStringAsFixed(2)} / shot';
+          '€${price.toStringAsFixed(2)} total  ·  ~€${costPerShot.toStringAsFixed(2)} / shot';
     }
 
     final subtitleParts = <String>[];
     subtitleParts.add('${remaining}g / ${total}g  ($pct% left)');
     if (costInfo != null) subtitleParts.add(costInfo);
+    if ((r['origin'] as String?)?.isNotEmpty == true) {
+      final pinned = r['origin_lat'] != null ? '📍' : '';
+      subtitleParts.add('$pinned${r['origin']}');
+    }
     if ((r['region'] as String?)?.isNotEmpty == true) {
       subtitleParts.add('Region: ${r['region']}');
     }

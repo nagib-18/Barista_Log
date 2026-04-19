@@ -1,7 +1,7 @@
 name: barista_log
 description: "A coffee tracking app."
 publish_to: 'none' 
-version: 2.0.0+2
+version: 2.0.1+3
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -18,6 +18,9 @@ dependencies:
   share_plus: ^10.0.0
   cupertino_icons: ^1.0.8
   url_launcher: ^6.2.5
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  http: ^1.2.1
 
 dev_dependencies:
   flutter_test:

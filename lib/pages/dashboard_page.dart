@@ -147,10 +147,10 @@ class _DashboardPageState extends State<DashboardPage> {
                         _stat("Avg Ratio", '1:${_fmt(homeStats['avgRatio'])}'),
                       if (homeStats['avgCostPerShot'] != null)
                         _stat("Avg Cost / Shot",
-                            '\$${(homeStats['avgCostPerShot'] as double).toStringAsFixed(2)}'),
+                            '€${(homeStats['avgCostPerShot'] as double).toStringAsFixed(2)}'),
                       if (homeStats['totalCost'] != null)
                         _stat("Total Spent",
-                            '\$${(homeStats['totalCost'] as double).toStringAsFixed(2)}'),
+                            '€${(homeStats['totalCost'] as double).toStringAsFixed(2)}'),
                     ],
                   ),
                   const SizedBox(height: 16),

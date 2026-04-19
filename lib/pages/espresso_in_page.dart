@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../db_helper.dart';
 
-// Dial-in taste outcomes with adjustment suggestions
 const _tasteTags = ['Sour', 'Slightly Sour', 'Balanced', 'Slightly Bitter', 'Bitter'];
 
 const _dialInSuggestions = {
@@ -33,6 +31,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
   final weightOutCtrl = TextEditingController();
   final grindCtrl = TextEditingController();
   final brewTempCtrl = TextEditingController();
+  final shotTimeCtrl = TextEditingController();
 
   double _rating = 3.0;
   double? _ratio;
@@ -40,11 +39,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
   int? _selectedRoastId;
   List<Map<String, dynamic>> logs = [];
   List<Map<String, dynamic>> roasts = [];
-
-  // ── Shot timer ──
-  Timer? _timer;
-  int _timerSeconds = 0;
-  bool _timerRunning = false;
 
   @override
   void initState() {
@@ -55,7 +49,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
 
   @override
   void dispose() {
-    _timer?.cancel();
     shotCtrl.dispose();
     brandCtrl.dispose();
     blendCtrl.dispose();
@@ -64,6 +57,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
     weightOutCtrl.dispose();
     grindCtrl.dispose();
     brewTempCtrl.dispose();
+    shotTimeCtrl.dispose();
     super.dispose();
   }
 
@@ -93,28 +87,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
     });
   }
 
-  void _startTimer() {
-    _timer?.cancel();
-    setState(() => _timerRunning = true);
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() => _timerSeconds++);
-    });
-  }
-
-  void _stopTimer() {
-    _timer?.cancel();
-    setState(() => _timerRunning = false);
-  }
-
-  void _resetTimer() {
-    _timer?.cancel();
-    setState(() {
-      _timerRunning = false;
-      _timerSeconds = 0;
-    });
-  }
-
-  String _formatTimer(int s) =>
+  String _formatSeconds(int s) =>
       '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   void _addCoffee() async {
@@ -126,6 +99,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
     final wIn = double.tryParse(weightInCtrl.text);
     final wOut = double.tryParse(weightOutCtrl.text);
     final brewTemp = double.tryParse(brewTempCtrl.text);
+    final shotTimeSec = int.tryParse(shotTimeCtrl.text);
     double? ratio;
     if (wIn != null && wIn > 0 && wOut != null && wOut > 0) {
       ratio = wOut / wIn;
@@ -143,7 +117,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
         'weight_out': wOut,
         'ratio': ratio,
         'roast_id': _selectedRoastId,
-        'shot_time': _timerSeconds > 0 ? _timerSeconds : null,
+        'shot_time': shotTimeSec,
         'grind_setting': grindCtrl.text.trim().isNotEmpty ? grindCtrl.text.trim() : null,
         'brew_temp': brewTemp,
         'taste_tag': _tasteTag,
@@ -167,14 +141,13 @@ class _EspressoInPageState extends State<EspressoInPage> {
       weightInCtrl.clear();
       weightOutCtrl.clear();
       grindCtrl.clear();
+      shotTimeCtrl.clear();
       setState(() {
         _rating = 3.0;
         _ratio = null;
         _selectedRoastId = null;
         _tasteTag = null;
       });
-      _resetTimer();
-      // Re-load default temp for next shot
       _loadDefaultTemp();
       _refresh();
       _snack("Shot logged!");
@@ -237,8 +210,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
         context: context,
         builder: (_) => AlertDialog(
           title: const Text("⚠️ CLEAN MACHINE"),
-          content: Text(
-              "$count shots since last reset.\nTime to clean your machine!"),
+          content: Text("$count shots since last reset.\nTime to clean your machine!"),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -252,7 +224,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Roast selector
         DropdownButtonFormField<int?>(
           value: _selectedRoastId,
           decoration: const InputDecoration(
@@ -290,9 +261,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
             child: Text(
               'Ratio  1 : ${_ratio!.toStringAsFixed(1)}',
               style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.brown),
+                  fontWeight: FontWeight.bold, fontSize: 16, color: Colors.brown),
             ),
           ),
 
@@ -302,46 +271,23 @@ class _EspressoInPageState extends State<EspressoInPage> {
           Expanded(child: _numField(brewTempCtrl, 'Brew Temp (°C)')),
         ]),
 
-        // Shot timer
+        // Manual shot time entry
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(4),
+          child: TextField(
+            controller: shotTimeCtrl,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Shot Time (seconds)',
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.timer, color: Colors.brown),
+              hintText: 'e.g. 27',
+              suffixText: 's',
+              helperText: shotTimeCtrl.text.isNotEmpty
+                  ? _formatSeconds(int.tryParse(shotTimeCtrl.text) ?? 0)
+                  : null,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.timer, color: Colors.brown),
-                const SizedBox(width: 8),
-                Text(
-                  _formatTimer(_timerSeconds),
-                  style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      fontFeatures: [FontFeature.tabularFigures()]),
-                ),
-                const Spacer(),
-                if (!_timerRunning)
-                  IconButton(
-                    icon: const Icon(Icons.play_arrow, color: Colors.brown),
-                    tooltip: 'Start',
-                    onPressed: _startTimer,
-                  ),
-                if (_timerRunning)
-                  IconButton(
-                    icon: const Icon(Icons.stop, color: Colors.brown),
-                    tooltip: 'Stop',
-                    onPressed: _stopTimer,
-                  ),
-                IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.grey),
-                  tooltip: 'Reset',
-                  onPressed: _resetTimer,
-                ),
-              ],
-            ),
+            onChanged: (_) => setState(() {}),
           ),
         ),
 
@@ -370,12 +316,10 @@ class _EspressoInPageState extends State<EspressoInPage> {
                   setState(() => _tasteTag = selected ? null : tag),
               labelStyle: TextStyle(
                   color: selected ? Colors.brown[900] : null,
-                  fontWeight:
-                      selected ? FontWeight.bold : FontWeight.normal),
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal),
             );
           }).toList(),
         ),
-        // Dial-in suggestions
         if (_tasteTag != null && _tasteTag != 'Balanced') ...[
           const SizedBox(height: 6),
           Wrap(
@@ -386,8 +330,7 @@ class _EspressoInPageState extends State<EspressoInPage> {
                 Chip(
                   avatar: const Icon(Icons.tips_and_updates,
                       size: 14, color: Colors.brown),
-                  label: Text(s,
-                      style: const TextStyle(fontSize: 12)),
+                  label: Text(s, style: const TextStyle(fontSize: 12)),
                   backgroundColor: Colors.brown[50],
                 ),
             ],
@@ -457,8 +400,6 @@ class _EspressoInPageState extends State<EspressoInPage> {
     if (title.isEmpty) title = item['shot'] ?? 'Shot';
 
     final parts = <String>[];
-
-    // Shot type + grind + temp on one line
     final shotLine = StringBuffer(item['shot'] ?? '');
     if (item['grind_setting'] != null &&
         item['grind_setting'].toString().isNotEmpty) {
@@ -482,10 +423,9 @@ class _EspressoInPageState extends State<EspressoInPage> {
       parts.add(w);
     }
     if (item['shot_time'] != null && (item['shot_time'] as int) > 0) {
-      parts.add('Time: ${_formatTimer(item['shot_time'] as int)}');
+      parts.add(_formatSeconds(item['shot_time'] as int));
     }
-    if (item['taste_tag'] != null &&
-        item['taste_tag'].toString().isNotEmpty) {
+    if (item['taste_tag'] != null && item['taste_tag'].toString().isNotEmpty) {
       parts.add('Taste: ${item['taste_tag']}');
     }
     parts.add(dateStr);

@@ -18,7 +18,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -28,19 +28,24 @@ class DatabaseHelper {
     );
   }
 
+  // Safely adds a column — silently skips if it already exists.
+  Future<void> _addCol(Database db, String table, String col, String type) async {
+    try {
+      final info = await db.rawQuery('PRAGMA table_info($table)');
+      final exists = info.any((r) => r['name'] == col);
+      if (!exists) await db.execute('ALTER TABLE $table ADD COLUMN $col $type');
+    } catch (_) {}
+  }
+
   Future _createDB(Database db, int version) async {
     await db.execute('''
       CREATE TABLE home_coffee (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         shot TEXT NOT NULL,
-        brand TEXT,
-        blend TEXT,
-        review TEXT,
+        brand TEXT, blend TEXT, review TEXT,
         rating REAL NOT NULL DEFAULT 3.0,
         date TEXT,
-        weight_in REAL,
-        weight_out REAL,
-        ratio REAL,
+        weight_in REAL, weight_out REAL, ratio REAL,
         roast_id INTEGER,
         shot_time INTEGER,
         grind_setting TEXT,
@@ -51,48 +56,34 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE external_coffee (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        blend TEXT,
-        cafe TEXT,
-        city TEXT,
-        country TEXT,
-        notes TEXT,
+        blend TEXT, cafe TEXT, city TEXT, country TEXT, notes TEXT,
         rating REAL,
-        rating_vibes REAL,
-        rating_coffee REAL,
-        rating_service REAL,
-        rating_price REAL,
+        rating_vibes REAL, rating_coffee REAL, rating_service REAL, rating_price REAL,
         date TEXT
       )
     ''');
     await db.execute('''
       CREATE TABLE roasts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        brand TEXT,
-        blend TEXT,
-        rating REAL,
-        notes TEXT,
-        date TEXT,
-        total_weight REAL,
-        remaining_weight REAL,
-        region TEXT,
-        flavor_profile TEXT,
-        price REAL
+        brand TEXT, blend TEXT,
+        rating REAL, notes TEXT, date TEXT,
+        total_weight REAL, remaining_weight REAL,
+        region TEXT, flavor_profile TEXT, price REAL,
+        origin TEXT, origin_lat REAL, origin_lng REAL
       )
     ''');
     await db.execute('''
-      CREATE TABLE settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      )
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)
     ''');
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // Each step is guarded — safe to run on any older version.
     if (oldVersion < 2) {
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN weight_in REAL');
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN weight_out REAL');
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN ratio REAL');
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN roast_id INTEGER');
+      await _addCol(db, 'home_coffee', 'weight_in', 'REAL');
+      await _addCol(db, 'home_coffee', 'weight_out', 'REAL');
+      await _addCol(db, 'home_coffee', 'ratio', 'REAL');
+      await _addCol(db, 'home_coffee', 'roast_id', 'INTEGER');
       await db.execute('''
         CREATE TABLE IF NOT EXISTS roasts (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,19 +96,24 @@ class DatabaseHelper {
       ''');
     }
     if (oldVersion < 3) {
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN shot_time INTEGER');
-      await db.execute('ALTER TABLE roasts ADD COLUMN region TEXT');
-      await db.execute('ALTER TABLE roasts ADD COLUMN flavor_profile TEXT');
-      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_vibes REAL');
-      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_coffee REAL');
-      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_service REAL');
-      await db.execute('ALTER TABLE external_coffee ADD COLUMN rating_price REAL');
+      await _addCol(db, 'home_coffee', 'shot_time', 'INTEGER');
+      await _addCol(db, 'roasts', 'region', 'TEXT');
+      await _addCol(db, 'roasts', 'flavor_profile', 'TEXT');
+      await _addCol(db, 'external_coffee', 'rating_vibes', 'REAL');
+      await _addCol(db, 'external_coffee', 'rating_coffee', 'REAL');
+      await _addCol(db, 'external_coffee', 'rating_service', 'REAL');
+      await _addCol(db, 'external_coffee', 'rating_price', 'REAL');
     }
     if (oldVersion < 4) {
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN grind_setting TEXT');
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN brew_temp REAL');
-      await db.execute('ALTER TABLE home_coffee ADD COLUMN taste_tag TEXT');
-      await db.execute('ALTER TABLE roasts ADD COLUMN price REAL');
+      await _addCol(db, 'home_coffee', 'grind_setting', 'TEXT');
+      await _addCol(db, 'home_coffee', 'brew_temp', 'REAL');
+      await _addCol(db, 'home_coffee', 'taste_tag', 'TEXT');
+      await _addCol(db, 'roasts', 'price', 'REAL');
+    }
+    if (oldVersion < 5) {
+      await _addCol(db, 'roasts', 'origin', 'TEXT');
+      await _addCol(db, 'roasts', 'origin_lat', 'REAL');
+      await _addCol(db, 'roasts', 'origin_lng', 'REAL');
     }
   }
 
@@ -172,6 +168,13 @@ class DatabaseHelper {
     final db = await instance.database;
     return await db.query('roasts',
         where: 'remaining_weight > 0', orderBy: 'date DESC');
+  }
+
+  Future<List<Map<String, dynamic>>> getRoastsWithCoords() async {
+    final db = await instance.database;
+    return await db.query('roasts',
+        where: 'origin_lat IS NOT NULL AND origin_lng IS NOT NULL',
+        orderBy: 'date DESC');
   }
 
   Future<int> updateRoastRating(int roastId, double newRating) async {
@@ -255,10 +258,16 @@ class DatabaseHelper {
   Future<List<String>> getDistinctHomeValues(String column) async {
     final db = await instance.database;
     if (column == 'shot') {
-      final r = await db.rawQuery(
-        "SELECT DISTINCT LOWER(REPLACE(TRIM(shot), ' ', '')) as norm_shot FROM home_coffee WHERE shot IS NOT NULL AND shot != '' ORDER BY norm_shot",
-      );
-      return r.map((row) => row['norm_shot'] as String).toList();
+      // Return the actual stored value (most common variant), deduplicated
+      // by the normalised key so "Double espresso" and "double espresso"
+      // count as the same group but display as the user typed them.
+      final r = await db.rawQuery('''
+        SELECT shot FROM home_coffee
+        WHERE shot IS NOT NULL AND shot != ''
+        GROUP BY LOWER(REPLACE(TRIM(shot), ' ', ''))
+        ORDER BY COUNT(*) DESC, shot
+      ''');
+      return r.map((row) => row['shot'] as String).toList();
     }
     final r = await db.rawQuery(
       "SELECT DISTINCT $column FROM home_coffee WHERE $column IS NOT NULL AND $column != '' ORDER BY $column",
@@ -281,6 +290,8 @@ class DatabaseHelper {
     String? shot,
   }) async {
     final db = await instance.database;
+
+    // Clauses for simple single-table queries
     final where = <String>[];
     final args = <dynamic>[];
     if (brand != null && brand.isNotEmpty) {
@@ -297,6 +308,23 @@ class DatabaseHelper {
     }
     final wc = where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : '';
     final and = wc.isEmpty ? 'WHERE' : '$wc AND';
+
+    // Aliased clauses for the JOIN cost query (h. prefix avoids ambiguity)
+    final joinWhere = <String>[];
+    final joinArgs = <dynamic>[];
+    if (brand != null && brand.isNotEmpty) {
+      joinWhere.add("h.brand = ?");
+      joinArgs.add(brand);
+    }
+    if (blend != null && blend.isNotEmpty) {
+      joinWhere.add("h.blend = ?");
+      joinArgs.add(blend);
+    }
+    if (shot != null && shot.isNotEmpty) {
+      joinWhere.add("LOWER(REPLACE(TRIM(h.shot), ' ', '')) = LOWER(REPLACE(?, ' ', ''))");
+      joinArgs.add(shot);
+    }
+    final joinExtra = joinWhere.isNotEmpty ? 'AND ${joinWhere.join(' AND ')}' : '';
 
     final total = Sqflite.firstIntValue(
             await db.rawQuery('SELECT COUNT(*) FROM home_coffee $wc', args)) ??
@@ -317,17 +345,21 @@ class DatabaseHelper {
       'SELECT AVG(ratio) as v FROM home_coffee $and ratio IS NOT NULL',
       args,
     );
-    // Total cost from shots linked to priced roasts
-    final costR = await db.rawQuery('''
-      SELECT SUM(h.weight_in * r.price / r.total_weight) as total_cost
-      FROM home_coffee h
-      JOIN roasts r ON h.roast_id = r.id
-      WHERE r.price IS NOT NULL AND r.price > 0
-        AND r.total_weight > 0
-        AND h.weight_in IS NOT NULL
-      ${wc.isNotEmpty ? 'AND ${where.join(' AND ')}' : ''}
-    ''', args);
-    final totalCost = (costR.first['total_cost'] as num?)?.toDouble();
+
+    // Cost query uses explicit h./r. aliases to avoid column ambiguity
+    double? totalCost;
+    try {
+      final costR = await db.rawQuery('''
+        SELECT SUM(h.weight_in * r.price / r.total_weight) as total_cost
+        FROM home_coffee h
+        JOIN roasts r ON h.roast_id = r.id
+        WHERE r.price IS NOT NULL AND r.price > 0
+          AND r.total_weight > 0
+          AND h.weight_in IS NOT NULL
+          $joinExtra
+      ''', joinArgs);
+      totalCost = (costR.first['total_cost'] as num?)?.toDouble();
+    } catch (_) {}
 
     return {
       'total': total,
